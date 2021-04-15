@@ -90,7 +90,7 @@ def get_us_stock_name_async(request_per_batch: int = 15) -> pd.DataFrame:
     """
     asyncio version of get_us_stock_name()
     Args:
-        request_per_batch (int, optional): 
+        request_per_batch (int, optional):
           n requests one asyncio loop before pending for a while. Defaults to 15.
     Returns:
         pd.DataFrame: same as get_us_stock_name()
@@ -176,6 +176,17 @@ def stock_us_spot() -> pd.DataFrame:
     return big_df
 
 
+def stock_us_adjust(symbol: str = 'AAPL'):
+    url = us_sina_stock_hist_qfq_url.format(symbol)
+    res = requests.get(url)
+    qfq_factor_df = pd.DataFrame(eval(res.text.split("=")[1].split("\n")[0])["data"])
+    qfq_factor_df.rename(columns={"c": "adjust", "d": "date", "f": "qfq_factor", }, inplace=True)
+    qfq_factor_df.index = pd.to_datetime(qfq_factor_df["date"])
+    del qfq_factor_df["date"]
+
+    return qfq_factor_df
+
+
 def stock_us_daily(symbol: str = "AAPL", adjust: str = "") -> pd.DataFrame:
     """
     新浪财经-美股
@@ -185,7 +196,8 @@ def stock_us_daily(symbol: str = "AAPL", adjust: str = "") -> pd.DataFrame:
     2. AI 新浪复权因子错误, 该股票刚上市未发生复权, 但是返回复权因子
     :param symbol: 可以使用 get_us_stock_name 获取
     :type symbol: str
-    :param adjust: "": 返回未复权的数据 ; qfq: 返回前复权后的数据; qfq-factor: 返回前复权因子和调整;
+    :param adjust: "": 返回未复权的数据 ; qfq: 返回前复权后的数据; qfq-factor: 返回前复权因子和调整; qfq-raw: 返回未复
+    权数据和前复权因子和调整
     :type adjust: str
     :return: 指定 adjust 的数据
     :rtype: pandas.DataFrame
@@ -202,12 +214,10 @@ def stock_us_daily(symbol: str = "AAPL", adjust: str = "") -> pd.DataFrame:
     del data_df["amount"]
     del data_df["date"]
     data_df = data_df.astype("float")
-    url = us_sina_stock_hist_qfq_url.format(symbol)
-    res = requests.get(url)
-    qfq_factor_df = pd.DataFrame(eval(res.text.split("=")[1].split("\n")[0])["data"])
-    qfq_factor_df.rename(columns={"c": "adjust", "d": "date", "f": "qfq_factor", }, inplace=True)
-    qfq_factor_df.index = pd.to_datetime(qfq_factor_df["date"])
-    del qfq_factor_df["date"]
+    if not adjust:
+        return data_df
+
+    qfq_factor_df = stock_us_adjust(symbol)
 
     # 处理复权因子
     temp_date_range = pd.date_range("1900-01-01", qfq_factor_df.index[0].isoformat())
@@ -218,7 +228,7 @@ def stock_us_daily(symbol: str = "AAPL", adjust: str = "") -> pd.DataFrame:
     new_range = new_range.fillna(method="ffill")
     new_range = new_range.iloc[:, [1, 2]]
 
-    if adjust == "qfq":
+    if adjust == "qfq" or adjust == 'qfq-raw':
         if len(new_range) == 1:
             new_range.index.values[0] = pd.to_datetime(str(data_df.index.date[0]))
         temp_df = pd.merge(
@@ -227,6 +237,8 @@ def stock_us_daily(symbol: str = "AAPL", adjust: str = "") -> pd.DataFrame:
         temp_df.fillna(method="ffill", inplace=True)
         temp_df.fillna(method="bfill", inplace=True)
         temp_df = temp_df.astype(float)
+        if adjust == 'qfq-raw':
+            return temp_df
         temp_df["open"] = temp_df["open"] * temp_df["qfq_factor"] + temp_df["adjust"]
         temp_df["high"] = temp_df["high"] * temp_df["qfq_factor"] + temp_df["adjust"]
         temp_df["close"] = temp_df["close"] * temp_df["qfq_factor"] + temp_df["adjust"]
@@ -280,6 +292,12 @@ def stock_us_fundamental(stock: str = "GOOGL", symbol: str = "info") -> pd.DataF
 
 
 if __name__ == "__main__":
+    df = stock_us_adjust(symbol="AMZN")
+    print(df)
+
+    stock_us_daily_df = stock_us_daily(symbol="AMZN", adjust="qfq-raw")
+    print(stock_us_daily_df)
+
     stock_us_stock_name_df = get_us_stock_name()
     print(stock_us_stock_name_df)
 
